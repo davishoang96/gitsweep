@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo check:*)",
+      "Bash(cmd /c \"\\\\\"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\18\\\\Professional\\\\Common7\\\\Tools\\\\VsDevCmd.bat\\\\\" && cargo check 2>&1 | tail -5\")",
+      "Bash(cmd /c \"\\\\\"C:\\\\Program Files\\\\Microsoft Visual Studio\\\\18\\\\Professional\\\\Common7\\\\Tools\\\\VsDevCmd.bat\\\\\" && cargo check 2>&1\")",
+      "Bash(cmd:*)",
+      "Bash(dir \"C:\\\\Program Files \\(x86\\)\\\\Windows Kits\\\\10\\\\Lib\" /b)",
+      "Read(//c/Program Files \\(x86\\)/Windows Kits/10/Lib/10.0.26100.0/um/x64/**)",
+      "Read(//c/Program Files \\(x86\\)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64/**)"
+    ]
+  }
+}
