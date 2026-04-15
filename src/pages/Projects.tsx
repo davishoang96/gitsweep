@@ -8,6 +8,8 @@ export default function Projects() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [fetchingId, setFetchingId] = useState<string | null>(null);
+  const [fetchError, setFetchError] = useState("");
 
   const load = () =>
     invoke<Project[]>("get_projects")
@@ -21,6 +23,18 @@ export default function Projects() {
     load();
   };
 
+  const handleFetch = async (id: string) => {
+    setFetchingId(id);
+    setFetchError("");
+    try {
+      await invoke("fetch_project", { projectId: id });
+    } catch (err) {
+      setFetchError(String(err));
+    } finally {
+      setFetchingId(null);
+    }
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -32,6 +46,8 @@ export default function Projects() {
           + Add Project
         </button>
       </div>
+
+      {fetchError && <div className="error-msg">{fetchError}</div>}
 
       {loading ? (
         <div className="loading"><div className="spinner" />Loading…</div>
@@ -58,6 +74,13 @@ export default function Projects() {
                   <div className="project-path">{p.path}</div>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    className="btn btn-ghost"
+                    disabled={fetchingId === p.id}
+                    onClick={() => handleFetch(p.id)}
+                  >
+                    {fetchingId === p.id ? "Fetching…" : "⬇ Fetch"}
+                  </button>
                   <Link to={`/projects/${p.id}`} className="btn btn-ghost">
                     Manage Branches
                   </Link>

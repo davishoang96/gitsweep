@@ -6,11 +6,18 @@ export default function History() {
   const [records, setRecords] = useState<DeletedBranch[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const load = () =>
     invoke<DeletedBranch[]>("get_deleted_branches")
       .then((data) => setRecords([...data].reverse()))
       .finally(() => setLoading(false));
-  }, []);
+
+  useEffect(() => { load(); }, []);
+
+  const handleClear = async () => {
+    if (!confirm("Clear all deletion history? This cannot be undone.")) return;
+    await invoke("clear_history");
+    load();
+  };
 
   if (loading) return <div className="loading"><div className="spinner" />Loading…</div>;
 
@@ -21,6 +28,11 @@ export default function History() {
           <div className="page-title">Deletion History</div>
           <div className="page-subtitle">All branches deleted via GitSweep</div>
         </div>
+        {records.length > 0 && (
+          <button className="btn btn-ghost" style={{ color: "var(--red-hover)", borderColor: "rgba(218,54,51,0.3)" }} onClick={handleClear}>
+            Clear History
+          </button>
+        )}
       </div>
 
       {records.length === 0 ? (

@@ -586,6 +586,32 @@ input[type="checkbox"] {
 .deleted-branch-name { font-family: monospace; font-size: 13px; }
 .deleted-project { font-size: 12px; color: var(--text-muted); background: var(--surface-2); padding: 2px 8px; border-radius: 4px; }
 
+/* ─── Inline refresh indicator ──────────────────────────────── */
+.refresh-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.refresh-indicator .spinner { width: 13px; height: 13px; }
+
+/* ─── Base branch selector ───────────────────────────────────── */
+.base-branch-select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.base-branch-select:focus { border-color: var(--accent); }
+.base-branch-select option { background: var(--surface); }
+
 /* ─── Force-delete warning ───────────────────────────────────── */
 .force-list { list-style: none; }
 .force-list li { padding: 4px 0; font-size: 13px; color: var(--text); font-family: monospace; }

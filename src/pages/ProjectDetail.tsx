@@ -10,6 +10,8 @@ export default function ProjectDetail() {
   const [project, setProject] = useState<Project | null>(null);
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [fetching, setFetching] = useState(false);
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<Filter>("all");
@@ -20,27 +22,50 @@ export default function ProjectDetail() {
   const [deleting, setDeleting] = useState(false);
   const [forceList, setForceList] = useState<DeleteFailure[]>([]);
   const [showForce, setShowForce] = useState(false);
+  const [baseBranch, setBaseBranch] = useState<string>("HEAD");
 
-  const load = async () => {
+  const load = async (base?: string, initial = false) => {
     if (!id) return;
-    setLoading(true);
+    if (initial) setLoading(true); else setRefreshing(true);
     setError("");
     try {
       const projects = await invoke<Project[]>("get_projects");
       const p = projects.find((x) => x.id === id) ?? null;
       setProject(p);
       if (p) {
-        const b = await invoke<BranchInfo[]>("get_branches", { projectId: id });
+        const b = await invoke<BranchInfo[]>("get_branches", {
+          projectId: id,
+          baseBranch: base ?? baseBranch,
+        });
         setBranches(b);
       }
     } catch (err) {
       setError(String(err));
     } finally {
-      setLoading(false);
+      if (initial) setLoading(false); else setRefreshing(false);
     }
   };
 
-  useEffect(() => { load(); }, [id]);
+  const handleFetch = async () => {
+    if (!id) return;
+    setFetching(true);
+    setError("");
+    try {
+      await invoke("fetch_project", { projectId: id });
+      await load();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  const handleBaseBranchChange = (branch: string) => {
+    setBaseBranch(branch);
+    load(branch);
+  };
+
+  useEffect(() => { load(undefined, true); }, [id]);
 
   const visible = useMemo(() => {
     let list = branches;
@@ -129,18 +154,15 @@ export default function ProjectDetail() {
 
   return (
     <div>
-      <div className="breadcrumb">
-        <Link to="/projects">Projects</Link>
-        <span className="breadcrumb-sep">/</span>
-        <span>{project.name}</span>
-      </div>
-
       <div className="page-header">
         <div>
           <div className="page-title">{project.name}</div>
           <div className="page-subtitle" style={{ fontFamily: "monospace" }}>{project.path}</div>
         </div>
-        <button className="btn btn-ghost" onClick={load}>↺ Refresh</button>
+          <span style={{ marginLeft: "auto", fontSize: 13, color: "var(--text-muted)" }}>
+          {branches.length} branch{branches.length !== 1 ? "es" : ""}
+        </span>
+        
       </div>
 
       {error && <div className="error-msg">{error}</div>}
@@ -186,9 +208,29 @@ export default function ProjectDetail() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        <span style={{ marginLeft: "auto", fontSize: 13, color: "var(--text-muted)" }}>
-          {branches.length} branch{branches.length !== 1 ? "es" : ""}
-        </span>
+ 
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--text-muted)" }}>
+            Merged into:
+            <select
+              className="base-branch-select"
+              value={baseBranch}
+              onChange={(e) => handleBaseBranchChange(e.target.value)}
+            >
+              <option value="HEAD">HEAD (current)</option>
+              {branches
+                .filter((b) => b.name !== "HEAD")
+                .map((b) => (
+                  <option key={b.name} value={b.name}>{b.name}</option>
+                ))}
+            </select>
+          </div>
+          {refreshing && <span className="refresh-indicator"><span className="spinner" />Updating…</span>}
+          <button className="btn btn-ghost" disabled={fetching || refreshing} onClick={handleFetch}>
+            {fetching ? "Fetching…" : "⬇ Fetch"}
+          </button>
+          <button className="btn btn-ghost" disabled={refreshing} onClick={() => load()}>↺ Refresh</button>
+        </div>
       </div>
 
       <div className="card">

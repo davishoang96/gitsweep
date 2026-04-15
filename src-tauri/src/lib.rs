@@ -170,7 +170,23 @@ fn remove_project(app: tauri::AppHandle, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn get_branches(app: tauri::AppHandle, project_id: String) -> Result<Vec<BranchInfo>, String> {
+fn fetch_project(app: tauri::AppHandle, project_id: String) -> Result<String, String> {
+    let data = load_data(&app);
+    let project = data
+        .projects
+        .iter()
+        .find(|p| p.id == project_id)
+        .ok_or("Project not found")?;
+
+    git(&["fetch", "--prune", "--all"], &project.path)
+}
+
+#[tauri::command]
+fn get_branches(
+    app: tauri::AppHandle,
+    project_id: String,
+    base_branch: Option<String>,
+) -> Result<Vec<BranchInfo>, String> {
     let data = load_data(&app);
     let project = data
         .projects
@@ -180,7 +196,8 @@ fn get_branches(app: tauri::AppHandle, project_id: String) -> Result<Vec<BranchI
 
     let current_branch = git_silent(&["rev-parse", "--abbrev-ref", "HEAD"], &project.path);
 
-    let merged_raw = git_silent(&["branch", "--merged", "HEAD"], &project.path);
+    let merge_target = base_branch.as_deref().unwrap_or("HEAD");
+    let merged_raw = git_silent(&["branch", "--merged", merge_target], &project.path);
     let merged: HashSet<String> = merged_raw
         .lines()
         .map(|l| l.trim().trim_start_matches('*').trim().to_string())
@@ -344,6 +361,13 @@ fn get_deleted_branches(app: tauri::AppHandle) -> Vec<DeletedBranchRecord> {
     load_data(&app).deleted_branches
 }
 
+#[tauri::command]
+fn clear_history(app: tauri::AppHandle) -> Result<(), String> {
+    let mut data = load_data(&app);
+    data.deleted_branches.clear();
+    save_data(&app, &data)
+}
+
 // ─── Entry ───────────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -359,6 +383,8 @@ pub fn run() {
             delete_branches,
             get_dashboard_stats,
             get_deleted_branches,
+            fetch_project,
+            clear_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
