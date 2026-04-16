@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useParams, Link } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { BranchInfo, DeleteBranchRequest, DeleteFailure, DeleteResult, Project } from "../types";
 
 type Filter = "all" | "merged" | "unmerged";
