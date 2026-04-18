@@ -50,7 +50,23 @@ export default function Projects() {
       {fetchError && <div className="error-msg">{fetchError}</div>}
 
       {loading ? (
-        <div className="loading"><div className="spinner" />Loading…</div>
+        <div className="card">
+          <div className="projects-grid">
+            {[0, 1, 2].map((i) => (
+              <div className="skeleton-row" key={i}>
+                <div className="skeleton-row-info">
+                  <div className="skeleton skeleton-text" style={{ width: 130 + i * 25 }} />
+                  <div className="skeleton skeleton-text" style={{ width: 200 + i * 30, height: 12 }} />
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <div className="skeleton" style={{ width: 80, height: 30, borderRadius: 6 }} />
+                  <div className="skeleton" style={{ width: 120, height: 30, borderRadius: 6 }} />
+                  <div className="skeleton" style={{ width: 70, height: 30, borderRadius: 6 }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       ) : projects.length === 0 ? (
         <div className="card">
           <div className="empty-state">

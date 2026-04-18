@@ -454,79 +454,116 @@ fn delete_branches(
 
 #[tauri::command]
 fn get_dashboard_stats(db: tauri::State<'_, Db>) -> DashboardStats {
-    let conn = db.0.lock().expect("db lock poisoned");
+    // Phase 1: read all DB data while holding the lock, then release it.
+    let (projects, total_deleted, cached_summaries, uncached_ids) = {
+        let conn = db.0.lock().expect("db lock poisoned");
 
-    let projects: Vec<Project> = {
-        let mut stmt = conn
-            .prepare("SELECT id, name, path, created_at FROM projects ORDER BY created_at")
-            .unwrap();
-        stmt.query_map([], |row| {
-            Ok(Project {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                path: row.get(2)?,
-                created_at: row.get(3)?,
+        let projects: Vec<Project> = {
+            let mut stmt = conn
+                .prepare("SELECT id, name, path, created_at FROM projects ORDER BY created_at")
+                .unwrap();
+            stmt.query_map([], |row| {
+                Ok(Project {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    path: row.get(2)?,
+                    created_at: row.get(3)?,
+                })
             })
-        })
-        .unwrap()
-        .filter_map(|r| r.ok())
-        .collect()
-    };
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+        };
 
-    let total_deleted: usize = conn
-        .query_row("SELECT COUNT(*) FROM deleted_branches", [], |row| {
-            row.get(0)
-        })
-        .unwrap_or(0);
-
-    let mut total_branches = 0usize;
-    let mut projects_summary = Vec::new();
-
-    for p in &projects {
-        // Try to read from cache first
-        let cached_count: usize = conn
-            .query_row(
-                "SELECT COUNT(*) FROM cached_branches WHERE project_id = ?1",
-                [&p.id],
-                |row| row.get(0),
-            )
+        let total_deleted: usize = conn
+            .query_row("SELECT COUNT(*) FROM deleted_branches", [], |row| {
+                row.get(0)
+            })
             .unwrap_or(0);
 
-        if cached_count > 0 {
-            // Use cached data
-            let current_branch: String = conn
+        let mut cached_summaries: Vec<ProjectSummary> = Vec::new();
+        let mut uncached_ids: Vec<String> = Vec::new();
+
+        for p in &projects {
+            let cached_count: usize = conn
                 .query_row(
-                    "SELECT name FROM cached_branches WHERE project_id = ?1 AND is_current = 1",
+                    "SELECT COUNT(*) FROM cached_branches WHERE project_id = ?1",
                     [&p.id],
                     |row| row.get(0),
                 )
-                .unwrap_or_default();
+                .unwrap_or(0);
 
-            total_branches += cached_count;
+            if cached_count > 0 {
+                let current_branch: String = conn
+                    .query_row(
+                        "SELECT name FROM cached_branches WHERE project_id = ?1 AND is_current = 1",
+                        [&p.id],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or_default();
+
+                cached_summaries.push(ProjectSummary {
+                    id: p.id.clone(),
+                    name: p.name.clone(),
+                    path: p.path.clone(),
+                    branch_count: cached_count,
+                    current_branch,
+                });
+            } else {
+                uncached_ids.push(p.id.clone());
+            }
+        }
+
+        (projects, total_deleted, cached_summaries, uncached_ids)
+        // lock is released here
+    };
+
+    // Phase 2: for uncached projects, run git outside the lock and populate cache.
+    let mut fresh_summaries: Vec<ProjectSummary> = Vec::new();
+    for p in projects.iter().filter(|p| uncached_ids.contains(&p.id)) {
+        let branches = fetch_branches_from_git(&p.path, "HEAD").unwrap_or_default();
+        let branch_count = branches.len();
+        let current_branch = branches
+            .iter()
+            .find(|b| b.is_current)
+            .map(|b| b.name.clone())
+            .unwrap_or_default();
+
+        // Persist to cache so future Dashboard loads are instant.
+        let conn = db.0.lock().expect("db lock poisoned");
+        update_branch_cache(&conn, &p.id, &branches);
+        drop(conn);
+
+        fresh_summaries.push(ProjectSummary {
+            id: p.id.clone(),
+            name: p.name.clone(),
+            path: p.path.clone(),
+            branch_count,
+            current_branch,
+        });
+    }
+
+    // Phase 3: merge results preserving original project order.
+    let mut projects_summary: Vec<ProjectSummary> = Vec::new();
+    let mut total_branches = 0usize;
+    for p in &projects {
+        if let Some(s) = cached_summaries.iter().find(|s| s.id == p.id) {
+            total_branches += s.branch_count;
             projects_summary.push(ProjectSummary {
-                id: p.id.clone(),
-                name: p.name.clone(),
-                path: p.path.clone(),
-                branch_count: cached_count,
-                current_branch,
+                id: s.id.clone(),
+                name: s.name.clone(),
+                path: s.path.clone(),
+                branch_count: s.branch_count,
+                current_branch: s.current_branch.clone(),
             });
-        } else {
-            // No cache yet — fall back to git (only happens on first visit before viewing project)
-            let branch_count = git_silent(&["branch"], &p.path)
-                .lines()
-                .filter(|l| !l.is_empty())
-                .count();
-            total_branches += branch_count;
-
-            let current_branch =
-                git_silent(&["rev-parse", "--abbrev-ref", "HEAD"], &p.path);
-
+        } else if let Some(s) = fresh_summaries.iter().find(|s| s.id == p.id) {
+            total_branches += s.branch_count;
             projects_summary.push(ProjectSummary {
-                id: p.id.clone(),
-                name: p.name.clone(),
-                path: p.path.clone(),
-                branch_count,
-                current_branch,
+                id: s.id.clone(),
+                name: s.name.clone(),
+                path: s.path.clone(),
+                branch_count: s.branch_count,
+                current_branch: s.current_branch.clone(),
             });
         }
     }

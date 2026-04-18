@@ -19,7 +19,41 @@ export default function History() {
     load();
   };
 
-  if (loading) return <div className="loading"><div className="spinner" />Loading…</div>;
+  if (loading) return (
+    <div>
+      <div className="page-header">
+        <div>
+          <div className="skeleton skeleton-title" />
+          <div className="skeleton skeleton-subtitle" />
+        </div>
+      </div>
+      <div className="card">
+        <div className="card-header">
+          <div className="skeleton skeleton-text" style={{ width: 130 }} />
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><div className="skeleton skeleton-text" style={{ width: 50 }} /></th>
+                <th><div className="skeleton skeleton-text" style={{ width: 50 }} /></th>
+                <th><div className="skeleton skeleton-text" style={{ width: 70 }} /></th>
+              </tr>
+            </thead>
+            <tbody>
+              {[0, 1, 2, 3, 4].map((i) => (
+                <tr key={i}>
+                  <td><div className="skeleton skeleton-text" style={{ width: 140 + i * 15 }} /></td>
+                  <td><div className="skeleton skeleton-text" style={{ width: 80, height: 22, borderRadius: 4 }} /></td>
+                  <td><div className="skeleton skeleton-text" style={{ width: 130 }} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div>

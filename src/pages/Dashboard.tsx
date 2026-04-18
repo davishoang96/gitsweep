@@ -15,9 +15,38 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="loading">
-        <div className="spinner" />
-        Loading…
+      <div>
+        <div className="page-header">
+          <div>
+            <div className="skeleton skeleton-title" />
+            <div className="skeleton skeleton-subtitle" />
+          </div>
+          <div className="skeleton" style={{ width: 120, height: 34, borderRadius: 6 }} />
+        </div>
+        <div className="stats-grid">
+          {[0, 1, 2].map((i) => (
+            <div className="skeleton-stat-card" key={i}>
+              <div className="skeleton skeleton-stat-value" />
+              <div className="skeleton skeleton-stat-label" />
+            </div>
+          ))}
+        </div>
+        <div className="card">
+          <div className="card-header">
+            <div className="skeleton skeleton-text" style={{ width: 70 }} />
+          </div>
+          <div className="projects-grid">
+            {[0, 1, 2].map((i) => (
+              <div className="skeleton-row" key={i}>
+                <div className="skeleton-row-info">
+                  <div className="skeleton skeleton-text" style={{ width: 140 + i * 30 }} />
+                  <div className="skeleton skeleton-text" style={{ width: 220 + i * 20, height: 12 }} />
+                </div>
+                <div className="skeleton" style={{ width: 70, height: 30, borderRadius: 6 }} />
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }

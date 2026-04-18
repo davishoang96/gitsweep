@@ -149,7 +149,61 @@ export default function ProjectDetail() {
     }
   };
 
-  if (loading) return <div className="loading"><div className="spinner" />Loading…</div>;
+  if (loading) return (
+    <div>
+      <div className="page-header">
+        <div>
+          <div className="skeleton skeleton-title" />
+          <div className="skeleton skeleton-subtitle" style={{ width: 300, fontFamily: "monospace" }} />
+        </div>
+        <div className="skeleton skeleton-text" style={{ width: 90, marginLeft: "auto" }} />
+      </div>
+      <div className="toolbar">
+        <div style={{ display: "flex", gap: 4 }}>
+          {[0, 1, 2].map((i) => (
+            <div className="skeleton" key={i} style={{ width: 70 + i * 10, height: 32, borderRadius: 6 }} />
+          ))}
+        </div>
+        <div className="skeleton" style={{ width: 220, height: 32, borderRadius: 6 }} />
+      </div>
+      <div className="card">
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th className="checkbox-col"><div className="skeleton" style={{ width: 15, height: 15 }} /></th>
+                <th><div className="skeleton skeleton-text" style={{ width: 50 }} /></th>
+                <th><div className="skeleton skeleton-text" style={{ width: 80 }} /></th>
+                <th><div className="skeleton skeleton-text" style={{ width: 35 }} /></th>
+                <th><div className="skeleton skeleton-text" style={{ width: 60 }} /></th>
+              </tr>
+            </thead>
+            <tbody>
+              {[0, 1, 2, 3, 4].map((i) => (
+                <tr key={i}>
+                  <td className="checkbox-col"><div className="skeleton" style={{ width: 15, height: 15 }} /></td>
+                  <td>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div className="skeleton skeleton-text" style={{ width: 120 + i * 20 }} />
+                      {i === 0 && <div className="skeleton skeleton-badge" />}
+                    </div>
+                  </td>
+                  <td>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <div className="skeleton skeleton-text" style={{ width: 60, height: 11 }} />
+                      <div className="skeleton skeleton-text" style={{ width: 180 + i * 15 }} />
+                    </div>
+                  </td>
+                  <td><div className="skeleton skeleton-text" style={{ width: 80 }} /></td>
+                  <td><div className="skeleton skeleton-text" style={{ width: 100 }} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
   if (!project) return <div className="error-msg">Project not found.</div>;
 
   return (
