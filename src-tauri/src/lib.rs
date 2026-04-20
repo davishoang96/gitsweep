@@ -2,10 +2,10 @@ mod db;
 
 use chrono::Utc;
 use db::Db;
+use git2::{BranchType, Cred, CredentialType, FetchOptions, FetchPrune, PushOptions, RemoteCallbacks, Repository};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::process::Command;
 use tauri::Manager;
 use uuid::Uuid;
 
@@ -83,59 +83,113 @@ pub struct DeleteResult {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-fn git(args: &[&str], cwd: &str) -> Result<String, String> {
-    let out = Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .map_err(|e| format!("Failed to run git: {}", e))?;
-    if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).to_string())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+fn relative_time(timestamp: i64) -> String {
+    let diff = Utc::now().timestamp().saturating_sub(timestamp);
+    match diff {
+        d if d < 60 => "just now".to_string(),
+        d if d < 3600 => {
+            let m = d / 60;
+            format!("{} minute{} ago", m, if m == 1 { "" } else { "s" })
+        }
+        d if d < 86400 => {
+            let h = d / 3600;
+            format!("{} hour{} ago", h, if h == 1 { "" } else { "s" })
+        }
+        d if d < 2_592_000 => {
+            let days = d / 86400;
+            format!("{} day{} ago", days, if days == 1 { "" } else { "s" })
+        }
+        d if d < 31_536_000 => {
+            let months = d / 2_592_000;
+            format!("{} month{} ago", months, if months == 1 { "" } else { "s" })
+        }
+        d => {
+            let years = d / 31_536_000;
+            format!("{} year{} ago", years, if years == 1 { "" } else { "s" })
+        }
     }
 }
 
-fn git_silent(args: &[&str], cwd: &str) -> String {
-    Command::new("git")
-        .args(args)
-        .current_dir(cwd)
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default()
+fn make_remote_callbacks<'a>() -> RemoteCallbacks<'a> {
+    let mut callbacks = RemoteCallbacks::new();
+    let mut attempts = 0u8;
+    callbacks.credentials(move |_url, username_from_url, allowed_types| {
+        attempts += 1;
+        if attempts > 3 {
+            return Err(git2::Error::from_str("authentication failed"));
+        }
+        let username = username_from_url.unwrap_or("git");
+        if allowed_types.contains(CredentialType::SSH_KEY) {
+            if let Ok(cred) = Cred::ssh_key_from_agent(username) {
+                return Ok(cred);
+            }
+            let home = std::env::var("HOME").unwrap_or_default();
+            for key_name in &["id_ed25519", "id_rsa", "id_ecdsa"] {
+                let private = std::path::Path::new(&home).join(".ssh").join(key_name);
+                if private.exists() {
+                    let public = private.with_extension("pub");
+                    if let Ok(cred) = Cred::ssh_key(username, Some(&public), &private, None) {
+                        return Ok(cred);
+                    }
+                }
+            }
+        }
+        if allowed_types.contains(CredentialType::DEFAULT) {
+            return Cred::default();
+        }
+        Err(git2::Error::from_str("no suitable credentials"))
+    });
+    callbacks
 }
 
-/// Fetch branches from git and return the list.
 fn fetch_branches_from_git(path: &str, base_branch: &str) -> Result<Vec<BranchInfo>, String> {
-    let current_branch = git_silent(&["rev-parse", "--abbrev-ref", "HEAD"], path);
+    let repo = Repository::open(path).map_err(|e| e.message().to_string())?;
 
-    let merged_raw = git_silent(&["branch", "--merged", base_branch], path);
-    let merged: HashSet<String> = merged_raw
-        .lines()
-        .map(|l| l.trim().trim_start_matches('*').trim().to_string())
-        .collect();
+    let current_branch = repo
+        .head()
+        .ok()
+        .and_then(|h| h.shorthand().map(|s| s.to_string()))
+        .unwrap_or_default();
 
-    let fmt = "%(refname:short)\t%(objectname:short)\t%(subject)\t%(committerdate:relative)\t%(upstream:short)";
-    let raw = git(&["branch", &format!("--format={}", fmt)], path)?;
+    let base_oid = repo
+        .revparse_single(base_branch)
+        .ok()
+        .and_then(|obj| obj.peel_to_commit().ok())
+        .map(|c| c.id());
 
-    let branches = raw
-        .lines()
-        .filter(|l| !l.is_empty())
-        .map(|line| {
-            let mut p = line.splitn(5, '\t');
-            let name = p.next().unwrap_or("").to_string();
-            let hash = p.next().unwrap_or("").to_string();
-            let msg = p.next().unwrap_or("").to_string();
-            let date = p.next().unwrap_or("").to_string();
-            let upstream = p
-                .next()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty());
+    let merged: HashSet<String> = if let Some(base_oid) = base_oid {
+        repo.branches(Some(BranchType::Local))
+            .map_err(|e| e.message().to_string())?
+            .filter_map(|b| b.ok())
+            .filter_map(|(branch, _)| {
+                let name = branch.name().ok().flatten()?.to_string();
+                let tip = branch.get().peel_to_commit().ok()?.id();
+                let is_merged =
+                    base_oid == tip || repo.graph_descendant_of(base_oid, tip).unwrap_or(false);
+                if is_merged { Some(name) } else { None }
+            })
+            .collect()
+    } else {
+        HashSet::new()
+    };
 
+    let branches = repo
+        .branches(Some(BranchType::Local))
+        .map_err(|e| e.message().to_string())?
+        .filter_map(|b| b.ok())
+        .filter_map(|(branch, _)| {
+            let name = branch.name().ok().flatten()?.to_string();
+            let commit = branch.get().peel_to_commit().ok()?;
+            let hash = commit.id().to_string()[..7].to_string();
+            let msg = commit.summary().unwrap_or("").to_string();
+            let date = relative_time(commit.time().seconds());
+            let upstream = branch
+                .upstream()
+                .ok()
+                .and_then(|u| u.name().ok().flatten().map(|s| s.to_string()));
             let is_current = name == current_branch;
             let is_merged = merged.contains(&name) && !is_current;
-
-            BranchInfo {
+            Some(BranchInfo {
                 name,
                 is_current,
                 last_commit_hash: hash,
@@ -143,7 +197,7 @@ fn fetch_branches_from_git(path: &str, base_branch: &str) -> Result<Vec<BranchIn
                 last_commit_date: date,
                 is_merged,
                 upstream,
-            }
+            })
         })
         .collect();
 
@@ -309,7 +363,26 @@ fn fetch_project(db: tauri::State<'_, Db>, project_id: String) -> Result<String,
         .map_err(|_| "Project not found".to_string())?;
     drop(conn);
 
-    let result = git(&["fetch", "--prune", "--all"], &path)?;
+    let repo = Repository::open(&path).map_err(|e| e.message().to_string())?;
+    let remote_names: Vec<String> = repo
+        .remotes()
+        .map_err(|e| e.message().to_string())?
+        .iter()
+        .flatten()
+        .map(|s| s.to_string())
+        .collect();
+
+    for remote_name in &remote_names {
+        let mut remote = repo
+            .find_remote(remote_name)
+            .map_err(|e| e.message().to_string())?;
+        let mut fetch_opts = FetchOptions::new();
+        fetch_opts.remote_callbacks(make_remote_callbacks());
+        fetch_opts.prune(FetchPrune::On);
+        remote
+            .fetch(&[] as &[&str], Some(&mut fetch_opts), None)
+            .map_err(|e| e.message().to_string())?;
+    }
 
     // Refresh cache after fetch
     if let Ok(branches) = fetch_branches_from_git(&path, "HEAD") {
@@ -317,7 +390,7 @@ fn fetch_project(db: tauri::State<'_, Db>, project_id: String) -> Result<String,
         update_branch_cache(&conn, &project_id, &branches);
     }
 
-    Ok(result)
+    Ok(format!("Fetched {} remote(s)", remote_names.len()))
 }
 
 #[tauri::command]
@@ -373,54 +446,67 @@ fn delete_branches(
     let mut deleted: Vec<String> = Vec::new();
     let mut failed: Vec<DeleteFailure> = Vec::new();
 
+    let repo = Repository::open(&project.path).map_err(|e| e.message().to_string())?;
+
     for req in &branches {
         if req.delete_remote {
-            match Command::new("git")
-                .args(["push", "origin", "--delete", &req.branch_name])
-                .current_dir(&project.path)
-                .output()
-            {
-                Ok(out) if !out.status.success() => {
-                    let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-                    failed.push(DeleteFailure {
-                        branch: format!("{} (remote)", req.branch_name),
-                        error: err,
-                        needs_force: false,
-                    });
+            match repo.find_remote("origin") {
+                Ok(mut remote) => {
+                    let refspec = format!(":refs/heads/{}", req.branch_name);
+                    let mut push_opts = PushOptions::new();
+                    push_opts.remote_callbacks(make_remote_callbacks());
+                    if let Err(e) = remote.push(&[refspec.as_str()], Some(&mut push_opts)) {
+                        failed.push(DeleteFailure {
+                            branch: format!("{} (remote)", req.branch_name),
+                            error: e.message().to_string(),
+                            needs_force: false,
+                        });
+                    }
                 }
                 Err(e) => {
                     failed.push(DeleteFailure {
                         branch: format!("{} (remote)", req.branch_name),
-                        error: e.to_string(),
+                        error: e.message().to_string(),
                         needs_force: false,
                     });
                 }
-                Ok(_) => {}
             }
         }
 
-        let flag = if force { "-D" } else { "-d" };
-        match Command::new("git")
-            .args(["branch", flag, &req.branch_name])
-            .current_dir(&project.path)
-            .output()
-        {
-            Ok(out) if out.status.success() => {
-                deleted.push(req.branch_name.clone());
-            }
-            Ok(out) => {
-                let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-                let needs_force = err.contains("not fully merged");
-                failed.push(DeleteFailure {
-                    branch: req.branch_name.clone(),
-                    error: err,
-                    needs_force,
-                });
+        match repo.find_branch(&req.branch_name, BranchType::Local) {
+            Ok(mut branch) => {
+                if !force {
+                    let head_oid = repo.head().and_then(|h| h.peel_to_commit()).map(|c| c.id());
+                    let tip_oid = branch.get().peel_to_commit().map(|c| c.id());
+                    if let (Ok(head), Ok(tip)) = (head_oid, tip_oid) {
+                        let is_merged =
+                            head == tip || repo.graph_descendant_of(head, tip).unwrap_or(false);
+                        if !is_merged {
+                            failed.push(DeleteFailure {
+                                branch: req.branch_name.clone(),
+                                error: format!(
+                                    "The branch '{}' is not fully merged.",
+                                    req.branch_name
+                                ),
+                                needs_force: true,
+                            });
+                            continue;
+                        }
+                    }
+                }
+                match branch.delete() {
+                    Ok(()) => deleted.push(req.branch_name.clone()),
+                    Err(e) => failed.push(DeleteFailure {
+                        branch: req.branch_name.clone(),
+                        error: e.message().to_string(),
+                        needs_force: false,
+                    }),
+                }
             }
             Err(e) => {
                 failed.push(DeleteFailure {
                     branch: req.branch_name.clone(),
-                    error: e.to_string(),
+                    error: e.message().to_string(),
                     needs_force: false,
                 });
             }
